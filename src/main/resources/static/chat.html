@@ -1,0 +1,797 @@
+<!doctype html>
+<html>
+    <head>
+        <title>IX-Chat - Pure WebSocket</title>
+        <!-- STOMP.js only - NO SockJS -->
+        <script
+            src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"
+            type="text/javascript"
+        ></script>
+        <style type="text/css">
+            body {
+                font-family: Arial, sans-serif;
+                margin: 30px;
+            }
+
+            input {
+                padding: 8px;
+                margin: 5px;
+            }
+
+            button {
+                padding: 8px 15px;
+                margin: 5px;
+                cursor: pointer;
+            }
+
+            button:disabled {
+                cursor: not-allowed;
+                opacity: 0.6;
+            }
+
+            #messages {
+                margin-top: 20px;
+                border: 1px solid #ccc;
+                padding: 15px;
+                width: 650px;
+                min-height: 150px;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+
+            .status {
+                margin-top: 10px;
+                font-weight: bold;
+            }
+
+            .message {
+                padding: 5px 0;
+            }
+        </style>
+    </head>
+    <body>
+        <h2>IX-Chat - WebSocket</h2>
+        <!-- USER CONNECTION -->
+        <div>
+            <input id="userId" placeholder="Your User ID" />
+            <button id="connectButton" onclick="connect()">Connect</button>
+            <button id="disconnectButton" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+        <br />
+        <!-- CHAT TYPE -->
+        <div style="margin-bottom: 15px">
+            <label>
+                <input type="radio" name="chatType" value="private" onchange="changeChatType()" /> Private Chat
+            </label>
+            <label style="margin-left: 20px">
+                <input type="radio" name="chatType" value="group" onchange="changeChatType()" />
+                Group Chat
+            </label>
+        </div>
+        <!-- PRIVATE CHAT -->
+        <div id="privatePanel">
+            <select id="receiverId">
+			    <option value="">Select Receiver</option>
+			</select>
+        </div>
+        <!-- GROUP CHAT -->
+        <div id="groupPanel" style="display: none">
+            <select id="groupId">
+			    <option value="">Select Groups</option>
+			</select>
+            <button id="joinGroupButton" onclick="joinGroup()" disabled>Join Group</button>
+            <button id="leaveGroupButton" onclick="leaveGroup()" disabled>Leave Group</button>
+        </div>
+        <!-- SEND MESSAGE -->
+        <div>
+            <input id="message" placeholder="Message" style="width: 300px" onkeydown="handleMessageKey(event)" />
+            <input type="file" id="attachment" accept=".pdf,.doc,.docx,.txt" />
+            <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
+        </div>
+        <!-- STATUS -->
+        <div class="status" id="status">Disconnected</div>
+        <h3>Messages</h3>
+        <!-- RECEIVED MESSAGES -->
+        <div id="messages"></div>
+        <script type="text/javascript">
+            /*
+             * STOMP client
+             */
+            let stompClient = null;
+            /*
+             * Current logged-in/test user
+             */
+            let userId = null;
+            /*
+             * Current subscription
+             *
+             * This is important.
+             * It prevents multiple subscriptions
+             * for the same user.
+             */
+            let userSubscription = null;
+            let groupSubscription = null;
+            let currentGroupId = null;
+            let chatType = "private";
+            /*
+             * CONNECT
+             */
+            function connect() {
+                /*
+                 * Prevent multiple connections
+                 */
+                if (stompClient) {
+                    console.log("WebSocket already connected/connecting.");
+                    return;
+                }
+                userId = document.getElementById("userId").value.trim();
+
+                if (!userId) {
+                    alert("Please enter User ID");
+                    return;
+                }
+                console.log("Connecting user:", userId);
+                /*
+                 * PURE WEBSOCKET
+                 *
+                 * No SockJS.
+                 */
+                stompClient = new StompJs.Client({
+                    brokerURL: "ws://localhost:8080/onyx-ix/main/ws/chat",
+
+                    connectHeaders: {
+                        userId: userId,
+                    },
+
+                    /*
+                     * Automatically reconnect if
+                     * WebSocket connection is lost.
+                     */
+                    reconnectDelay: 5000,
+
+                    /*
+                     * STOMP debug
+                     */
+                    debug: function (str) {
+                        console.log("STOMP:", str);
+                    },
+
+                    /*
+                     * CONNECTED
+                     */
+                    onConnect: function (frame) {
+                        console.log("WebSocket connected:", frame);
+
+                        /*
+                         * Update status
+                         */
+                        document.getElementById("status").innerText = "Connected as User: " + userId;
+
+                        /*
+                         * Button states
+                         */
+                        document.getElementById("connectButton").disabled = true;
+
+                        document.getElementById("disconnectButton").disabled = false;
+
+                        document.getElementById("sendButton").disabled = false;
+
+                        document.getElementById("joinGroupButton").disabled = false;
+
+                        /*
+                         * If an old subscription exists,
+                         * remove it first.
+                         */
+                        if (userSubscription) {
+                            console.log("Removing old subscription");
+
+                            userSubscription.unsubscribe();
+
+                            userSubscription = null;
+                        }
+
+                        /*
+                         * Subscribe to user's channel
+                         *
+                         * Example:
+                         *
+                         * User 1001
+                         *
+                         * /topic/user/1001
+                         */
+                        const destination = "/Ix-topic/user/" + userId;
+
+                        console.log("Subscribing to:", destination);
+
+                        userSubscription = stompClient.subscribe(
+                            destination,
+
+                            function (response) {
+                                console.log("Message received:", response.body);
+
+                                try {
+                                    const message = JSON.parse(response.body);
+
+                                    displayMessage(message);
+                                 	// Tell backend message reached this client
+                                    stompClient.publish({
+                                        destination: "/Ix-app/chat.delivered",
+                                        body: JSON.stringify({
+                                            messageId: message.messageId,
+                                            receiverId: userId
+                                        })
+                                    });
+                                } catch (error) {
+                                    console.error("Invalid message:", error);
+                                }
+                            }
+                            
+                        );
+
+                        console.log("Subscription created:", userSubscription.id);
+
+                        // IMPORTANT:
+                        // The private subscription is now ready.
+                        // Tell the backend to deliver any offline messages.
+                        stompClient.publish({
+                            destination: "/Ix-app/chat.ready",
+                            body: JSON.stringify({
+                                userId: userId,
+                            }),
+                        });
+
+                        console.log("Sent chat.ready for:", userId);
+                    },
+
+                    /*
+                     * STOMP ERROR
+                     */
+                    onStompError: function (frame) {
+                        console.error("STOMP Error:", frame);
+
+                        document.getElementById("status").innerText = "STOMP Error";
+                    },
+
+                    /*
+                     * WEBSOCKET ERROR
+                     */
+                    onWebSocketError: function (error) {
+                        console.error("WebSocket Error:", error);
+
+                        document.getElementById("status").innerText = "WebSocket Error";
+                    },
+
+                    /*
+                     * WEBSOCKET CLOSED
+                     */
+                    onWebSocketClose: function (event) {
+                        console.log("WebSocket closed:", event);
+
+                        document.getElementById("status").innerText = "Disconnected";
+
+                        /*
+                         * Don't immediately destroy
+                         * stompClient here because
+                         * STOMP may automatically reconnect.
+                         */
+                    },
+                });
+
+                /*
+                 * Start connection http://localhost:8080/api/chat/users
+                 */
+                stompClient.activate();
+            }
+
+            function changeChatType() {
+                chatType = document.querySelector('input[name="chatType"]:checked').value;
+
+                document.getElementById("privatePanel").style.display = chatType === "private" ? "block" : "none";
+
+                document.getElementById("groupPanel").style.display = chatType === "group" ? "block" : "none";
+
+                if (chatType === "private") {
+                	loadUsers();
+                    leaveGroup();
+                }
+                else if (chatType === "group") {
+					loadGroups();
+				}
+            }
+
+            function joinGroup() {
+                if (!stompClient || !stompClient.connected) {
+                    alert("Please connect first");
+                    return;
+                }
+
+                const groupId = document.getElementById("groupId").value.trim();
+
+                if (!groupId) {
+                    alert("Please enter Group ID");
+                    return;
+                }
+
+                if (groupSubscription) {
+                    groupSubscription.unsubscribe();
+                    groupSubscription = null;
+                }
+
+                currentGroupId = groupId;
+
+                const destination = "/Ix-topic/group/" + groupId;
+
+                groupSubscription = stompClient.subscribe(destination, function (response) {
+                    try {
+                        const message = JSON.parse(response.body);
+                        displayMessage(message, "group");
+                    } catch (error) {
+                        console.error("Invalid group message:", error);
+                    }
+                });
+
+                document.getElementById("joinGroupButton").disabled = true;
+                document.getElementById("leaveGroupButton").disabled = false;
+
+                addSystemMessage("Joined group: " + groupId);
+            }
+
+            function leaveGroup() {
+                if (groupSubscription) {
+                    groupSubscription.unsubscribe();
+                    groupSubscription = null;
+                }
+
+                if (currentGroupId) {
+                    addSystemMessage("Left group: " + currentGroupId);
+                }
+
+                currentGroupId = null;
+
+                const joinButton = document.getElementById("joinGroupButton");
+
+                const leaveButton = document.getElementById("leaveGroupButton");
+
+                if (joinButton) {
+                    joinButton.disabled = !stompClient || !stompClient.connected;
+                }
+
+                if (leaveButton) {
+                    leaveButton.disabled = true;
+                }
+            }
+
+            /*
+             * DISPLAY RECEIVED MESSAGE
+             */
+            function displayMessage(message, type = "private", ownMessage = false) {
+                const messageDiv = document.getElementById("messages");
+
+                const div = document.createElement("div");
+
+                div.className = "message";
+
+                const sender = document.createElement("b");
+
+                if (type === "group") {
+                    sender.innerText = "[" + message.groupId + "] " + message.senderId + ": ";
+                } else {
+                    sender.innerText = message.senderId + ": ";
+                }
+
+                div.appendChild(sender);
+
+                if (message.message && message.message.trim() !== "") {
+                    const text = document.createElement("span");
+
+                    text.innerText = " " + message.message;
+
+                    div.appendChild(text);
+                }
+
+                if (message.attachment && message.attachment.fileId) {
+                    const attachment = message.attachment;
+
+                    const attachmentDiv = document.createElement("div");
+
+                    attachmentDiv.style.marginTop = "8px";
+                    attachmentDiv.style.padding = "10px";
+                    attachmentDiv.style.background = "#f1f3f5";
+                    attachmentDiv.style.border = "1px solid #ddd";
+                    attachmentDiv.style.borderRadius = "5px";
+                    attachmentDiv.style.width = "fit-content";
+
+                    const fileName = document.createElement("strong");
+
+                    fileName.innerText = String.fromCodePoint(0x1f4ce) + " " + (attachment.fileName || "Attachment");
+
+                    attachmentDiv.appendChild(fileName);
+
+                    if (attachment.fileSize != null) {
+                        const fileSize = document.createElement("span");
+
+                        fileSize.innerText = " (" + formatFileSize(attachment.fileSize) + ")";
+
+                        fileSize.style.color = "#666";
+
+                        attachmentDiv.appendChild(fileSize);
+                    }
+
+                    if (attachment.fileType) {
+                        const fileType = document.createElement("div");
+
+                        fileType.innerText = attachment.fileType;
+
+                        fileType.style.fontSize = "12px";
+                        fileType.style.color = "#777";
+                        fileType.style.marginTop = "3px";
+
+                        attachmentDiv.appendChild(fileType);
+                    }
+
+                    if (attachment.downloadUrl) {
+                        const downloadLink = document.createElement("a");
+
+                        downloadLink.href = attachment.downloadUrl;
+
+                        downloadLink.innerText = "Download";
+
+                        downloadLink.target = "_blank";
+                        downloadLink.rel = "noopener noreferrer";
+
+                        downloadLink.style.display = "inline-block";
+
+                        downloadLink.style.marginTop = "6px";
+
+                        downloadLink.style.color = "#0d6efd";
+
+                        downloadLink.style.textDecoration = "none";
+
+                        attachmentDiv.appendChild(downloadLink);
+                    }
+
+                    div.appendChild(attachmentDiv);
+                }
+
+                if (ownMessage) {
+                    const own = document.createElement("span");
+
+                    own.innerText = " (You)";
+                    own.style.color = "green";
+
+                    div.appendChild(own);
+                }
+
+                messageDiv.appendChild(div);
+
+                messageDiv.scrollTop = messageDiv.scrollHeight;
+            }
+
+            function formatFileSize(bytes) {
+                if (bytes == null || bytes <= 0) {
+                    return "0 Bytes";
+                }
+
+                const units = ["Bytes", "KB", "MB", "GB"];
+
+                const i = Math.floor(Math.log(bytes) / Math.log(1024));
+
+                return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i];
+            }
+
+            function addSystemMessage(text) {
+                const messageDiv = document.getElementById("messages");
+
+                const p = document.createElement("p");
+
+                p.className = "message";
+                p.style.color = "#666";
+                p.innerText = "System: " + text;
+
+                messageDiv.appendChild(p);
+
+                messageDiv.scrollTop = messageDiv.scrollHeight;
+            }
+
+            /*
+             * SEND MESSAGE
+             */
+            async function sendMessage() {
+                if (!stompClient || !stompClient.connected) {
+                    alert("Please connect first");
+                    return;
+                }
+
+                const message = document.getElementById("message").value.trim();
+
+                try {
+                    // Upload the selected file first.
+                    // Only attachment metadata is sent by WebSocket.
+                    const attachment = await uploadAttachment();
+
+                    // Allow text-only, attachment-only,
+                    // or text + attachment.
+                    if (!message && !attachment) {
+                        alert("Enter a message or select a file.");
+
+                        return;
+                    }
+
+                    if (chatType === "private") {
+                        const receiverId = document.getElementById("receiverId").value.trim();
+
+                        if (!receiverId) {
+                            alert("Please enter Receiver User ID");
+
+                            return;
+                        }
+
+                        const chatMessage = {
+                            senderId: userId,
+
+                            receiverId: receiverId,
+
+                            message: message,
+
+                            attachment: attachment,
+                        };
+
+                        console.log("CHAT MESSAGE =", JSON.stringify(chatMessage, null, 2));
+
+                        console.log("ATTACHMENT =", attachment);
+
+                        stompClient.publish({
+                            destination: "/Ix-app/chat.send",
+
+                            body: JSON.stringify(chatMessage),
+                        });
+
+                        displayMessage(chatMessage, "private", true);
+                    } else {
+                        if (!currentGroupId) {
+                            alert("Please join a group first");
+
+                            return;
+                        }
+
+                        const groupMessage = {
+                            senderId: userId,
+
+                            groupId: currentGroupId,
+
+                            message: message,
+
+                            attachment: attachment,
+                        };
+
+                        console.log("GROUP CHAT MESSAGE =", JSON.stringify(groupMessage, null, 2));
+
+                        console.log("GROUP ATTACHMENT =", attachment);
+
+                        stompClient.publish({
+                            destination: "/Ix-app/group.send",
+
+                            body: JSON.stringify(groupMessage),
+                        });
+
+                        displayMessage(groupMessage, "group", true);
+                    }
+
+                    document.getElementById("message").value = "";
+
+                    document.getElementById("attachment").value = "";
+                } catch (error) {
+                    console.error("Send message error:", error);
+
+                    alert("Unable to send message: " + error.message);
+                }
+            }
+
+            /*
+             * ENTER KEY = SEND MESSAGE
+             */
+            function handleMessageKey(event) {
+                if (event.key === "Enter") {
+                    sendMessage();
+                }
+            }
+
+            /*
+             * DISCONNECT
+             */
+            function disconnect() {
+                console.log("Disconnecting...");
+
+                /*
+                 * Remove group subscription
+                 */
+                if (groupSubscription) {
+                    groupSubscription.unsubscribe();
+                    groupSubscription = null;
+                }
+
+                currentGroupId = null;
+
+                /*
+                 * Remove private subscription
+                 */
+                if (userSubscription) {
+                    console.log("Unsubscribing:", userSubscription.id);
+
+                    userSubscription.unsubscribe();
+
+                    userSubscription = null;
+                }
+
+                /*
+                 * Disconnect WebSocket
+                 */
+                if (stompClient) {
+                    stompClient
+                        .deactivate()
+                        .then(function () {
+                            console.log("WebSocket disconnected");
+                        })
+                        .catch(function (error) {
+                            console.error("Disconnect error:", error);
+                        });
+
+                    stompClient = null;
+                }
+
+                /*
+                 * Reset status
+                 */
+                document.getElementById("status").innerText = "Disconnected";
+
+                /*
+                 * Button states
+                 */
+                document.getElementById("connectButton").disabled = false;
+
+                document.getElementById("disconnectButton").disabled = true;
+
+                document.getElementById("sendButton").disabled = true;
+
+                document.getElementById("joinGroupButton").disabled = true;
+
+                document.getElementById("leaveGroupButton").disabled = true;
+            }
+
+            async function uploadAttachment() {
+                const input = document.getElementById("attachment");
+
+                if (!input.files.length) {
+                    return null;
+                }
+
+                const file = input.files[0];
+
+                console.log("Selected file:", file.name);
+
+                console.log("File size:", file.size);
+
+                console.log("File type:", file.type);
+
+                const allowedExtensions = [".pdf", ".doc", ".docx", ".txt"];
+
+                const lowerName = file.name.toLowerCase();
+
+                const validExtension = allowedExtensions.some((extension) => lowerName.endsWith(extension));
+
+                if (!validExtension) {
+                    throw new Error("Only PDF, DOC, DOCX and TXT files are allowed.");
+                }
+
+                const maxSize = 10 * 1024 * 1024;
+
+                if (file.size > maxSize) {
+                    throw new Error("Maximum file size is 10 MB.");
+                }
+
+                const formData = new FormData();
+
+                formData.append("file", file);
+
+                const response = await fetch("/onyx-ix/main/api/chat/files", {
+                    method: "POST",
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    throw new Error("File upload failed: HTTP " + response.status);
+                }
+
+                const attachment = await response.json();
+
+                console.log("UPLOAD RESPONSE:", JSON.stringify(attachment, null, 2));
+
+                return attachment;
+            }
+            
+            async function loadUsers() {
+
+                const select =
+                    document.getElementById("receiverId");
+
+                // Clear existing options
+                select.innerHTML =
+                    '<option value="">Select Receiver</option>';
+
+                try {
+
+                    const response =
+                        await fetch("/onyx-ix/main/api/chat/users");
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "Failed to load users"
+                        );
+                    }
+
+                    const users = await response.json();
+
+                    users.forEach(function(userId) {
+
+                        const option =
+                            document.createElement("option");
+
+                        option.value = userId;
+                        option.textContent = userId;
+
+                        select.appendChild(option);
+                    });
+
+                } catch (error) {
+
+                    console.error(
+                        "Error loading users:",
+                        error
+                    );
+                }
+            }
+            
+            async function loadGroups() {
+
+                const select =
+                    document.getElementById("groupId");
+
+                // Clear existing options
+                select.innerHTML =
+                    '<option value="">Select Groups</option>';
+
+                try {
+
+                    const response =
+                        await fetch("/onyx-ix/main/api/chat/groups");
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "Failed to load groups"
+                        );
+                    }
+
+                    const groups = await response.json();
+
+                    groups.forEach(function(groupId) {
+
+                        const option =
+                            document.createElement("option");
+
+                        option.value = groupId;
+                        option.textContent = groupId;
+
+                        select.appendChild(option);
+                    });
+
+                } catch (error) {
+
+                    console.error(
+                        "Error loading Groups:",
+                        error
+                    );
+                }
+            }
+        </script>
+    </body>
+</html>
