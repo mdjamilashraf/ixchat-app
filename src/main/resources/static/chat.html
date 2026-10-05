@@ -324,7 +324,12 @@
                 groupSubscription = stompClient.subscribe(destination, function (response) {
                     try {
                         const message = JSON.parse(response.body);
-                        displayMessage(message, "group");
+                        //displayMessage(message, "group");
+                        displayMessage(
+                                message,
+                                "group",
+                                message.senderId === userId
+                            );
                     } catch (error) {
                         console.error("Invalid group message:", error);
                     }
@@ -364,21 +369,19 @@
             /*
              * DISPLAY RECEIVED MESSAGE
              */
+             const displayedMessageIds = new Set();
             function displayMessage(message, type = "private", ownMessage = false) {
+// 				alert("Message received: " + JSON.stringify(message));
+// 				alert("Type: " + type + ", Own Message: " + ownMessage);
                 const messageDiv = document.getElementById("messages");
-
                 const div = document.createElement("div");
-
                 div.className = "message";
-
                 const sender = document.createElement("b");
-
                 if (type === "group") {
                     sender.innerText = "[" + message.groupId + "] " + message.senderId + ": ";
                 } else {
                     sender.innerText = message.senderId + ": ";
                 }
-
                 div.appendChild(sender);
 
                 if (message.message && message.message.trim() !== "") {
@@ -556,11 +559,8 @@
 
                         const groupMessage = {
                             senderId: userId,
-
                             groupId: currentGroupId,
-
                             message: message,
-
                             attachment: attachment,
                         };
 
@@ -570,11 +570,11 @@
 
                         stompClient.publish({
                             destination: "/Ix-app/group.send",
-
                             body: JSON.stringify(groupMessage),
                         });
-
-                        displayMessage(groupMessage, "group", true);
+						
+                        //displayMessage(groupMessage, "group", true);
+                        //displayMessage(groupMessage, "group", message.senderId === userId);
                     }
 
                     document.getElementById("message").value = "";

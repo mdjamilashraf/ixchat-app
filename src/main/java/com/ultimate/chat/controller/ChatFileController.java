@@ -2,8 +2,12 @@ package com.ultimate.chat.controller;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.Base64;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Optional;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -22,7 +26,6 @@ import com.ultimate.chat.service.ChatFileService;
 import com.ultimate.chat.repository.ChatAttachmentRepository;
 import com.ultimate.chat.entity.ChatAttachment;
 import com.ultimate.chat.util.EncryptionService;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/chat/files")
@@ -31,6 +34,9 @@ public class ChatFileController {
     private final ChatFileService fileService;
     private final ChatAttachmentRepository attachmentRepository;
     private final EncryptionService encryptionService;
+
+    @Value("${ixchat.file.storage.location}")
+    private String storageLocation;
 
     public ChatFileController(
             ChatFileService fileService,
@@ -50,44 +56,47 @@ public class ChatFileController {
 
         return fileService.saveFile(file);
     }
-    
+
     @GetMapping("/{fileId}/download")
     public ResponseEntity<Resource> downloadFile(
             @PathVariable String fileId)
             throws IOException {
 
-    	System.out.println("Downloading file with ID: " + fileId);
-    	
-    	// Find attachment by fileId (stored in storagePath) using database query
-    	Optional<ChatAttachment> attachmentOptional = attachmentRepository.findByStoragePath(fileId);
-    	
-    	if (!attachmentOptional.isPresent()) {
-    		throw new java.io.FileNotFoundException("File not found in database");
-    	}
-    	
-    	ChatAttachment attachment = attachmentOptional.get();
-    	
-    	if (attachment.getFileData() == null || attachment.getFileData().isEmpty()) {
-    		throw new IOException("File data is missing from database");
-    	}
-    	
-    	// Decode base64 from TEXT column
-    	byte[] encryptedData = Base64.getDecoder().decode(attachment.getFileData());
-    	
-    	// Decrypt file data using stored IV
-    	byte[] decryptedData = encryptionService.decryptBytes(encryptedData, attachment.getIv());
-    	
-    	ByteArrayResource resource = new ByteArrayResource(decryptedData);
-    	
-    	String contentType = attachment.getFileType();
-    	if (contentType == null || contentType.isBlank()) {
-    		contentType = "application/octet-stream";
-    	}
-    	
-    	return ResponseEntity.ok()
-    		.contentType(MediaType.parseMediaType(contentType))
-    		.header(HttpHeaders.CONTENT_DISPOSITION,
-    			"attachment; filename=\"" + attachment.getFileName() + "\"")
-    		.body(resource);
+        // Find attachment by fileId (stored in storagePath) using database query
+        Optional<ChatAttachment> attachmentOptional = attachmentRepository.findByStoragePath(fileId);
+
+        if (!attachmentOptional.isPresent()) {
+            throw new FileNotFoundException("File metadata not found in database");
+        }
+
+        ChatAttachment attachment = attachmentOptional.get();
+
+        if (attachment.getIv() == null || attachment.getIv().isBlank()) {
+            throw new IOException("Missing IV for decryption");
+        }
+
+        // Resolve the encrypted file on disk
+        Path storageDir = Paths.get(storageLocation).toAbsolutePath().normalize();
+        Path encryptedFile = storageDir.resolve(attachment.getStoragePath());
+
+        if (!Files.exists(encryptedFile)) {
+            throw new FileNotFoundException("Encrypted file not found on disk: " + encryptedFile.toString());
+        }
+
+        // Decrypt file to bytes using stored IV
+        byte[] decryptedData = encryptionService.decryptToBytes(encryptedFile, attachment.getIv());
+
+        ByteArrayResource resource = new ByteArrayResource(decryptedData);
+
+        String contentType = attachment.getFileType();
+        if (contentType == null || contentType.isBlank()) {
+            contentType = "application/octet-stream";
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + attachment.getFileName() + "\"")
+                .body(resource);
     }
 }

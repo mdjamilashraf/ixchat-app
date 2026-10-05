@@ -11,4 +11,5 @@ public class GroupMessageResponse {
 	private String messageType;
 	private String groupId;
 	private LocalDateTime createdAt;
+	private ChatAttachmentReq attachment;
 }

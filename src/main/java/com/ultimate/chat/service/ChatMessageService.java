@@ -126,7 +126,7 @@ public class ChatMessageService {
 			attachment.setDownloadUrl(attachmentDTO.getDownloadUrl());
 			attachment.setEncrypted(attachmentDTO.getEncrypted());
 			attachment.setIv(attachmentDTO.getIv());
-			attachment.setFileData(attachmentDTO.getFileData());
+			//attachment.setFileData(attachmentDTO.getFileData());
 
 			ChatAttachment savedAttachment = attachmentRepository.save(attachment);
 
@@ -215,7 +215,7 @@ public class ChatMessageService {
 			attachment.setDownloadUrl(attachmentDTO.getDownloadUrl());
 			attachment.setEncrypted(attachmentDTO.getEncrypted());
 			attachment.setIv(attachmentDTO.getIv());
-			attachment.setFileData(attachmentDTO.getFileData());
+			//attachment.setFileData(attachmentDTO.getFileData());
 			ChatAttachment savedAttachment = attachmentRepository.save(attachment);
 			System.out.println("Saved attachment ID = " + savedAttachment.getFileId());
 		}

@@ -151,7 +151,7 @@ public class PendingMessageService {
 
 	        dto.setEncrypted(attachment.getEncrypted());
 	        dto.setIv(attachment.getIv());
-	        dto.setFileData(attachment.getFileData());
+	        //dto.setFileData(attachment.getFileData());
 
 	        response.setAttachment(dto);
 	    }

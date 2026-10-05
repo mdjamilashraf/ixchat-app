@@ -30,8 +30,8 @@ public class ChatAttachment {
 	@Column(name = "download_url", length = 1000)
 	private String downloadUrl;
 
-	@Column(name = "file_data", columnDefinition = "text")
-	private String fileData;
+//	@Column(name = "file_data", columnDefinition = "text")
+//	private String fileData;
 
 	@Column(name = "encrypted", nullable = false)
 	private Short encrypted;
