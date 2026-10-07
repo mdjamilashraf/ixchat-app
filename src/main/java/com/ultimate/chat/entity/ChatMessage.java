@@ -17,7 +17,6 @@ public class ChatMessage {
 	@Column(name = "sender_id", length = 100, nullable = false)
 	private String senderId;
 
-	//@Lob
 	@Column(name = "message_text", columnDefinition = "text")
 	private String message;
 
